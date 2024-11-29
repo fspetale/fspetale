@@ -1,6 +1,6 @@
 {
   "name": "rofexjs",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "--- # Documentación Rofexjs ---",
   "main": "./jsRofex.js",
   "types": "./jsRofex.d.ts",

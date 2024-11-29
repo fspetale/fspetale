@@ -71,12 +71,23 @@ export interface InstrumentsResponse extends RofexResponse {
     instruments: Instrument[];
 }
 
-export interface MarketData {
-    [key: string]: {
-        price: number;
-        size: number;
-        date?: number; // Optional if present in some cases
-    }
+// Define the structure of a single market data entry
+interface MarketDataEntry {
+    price: number;
+    size: number;
+    date: number;
+}
+
+// Dynamically create the MarketData interface based on Entry
+type MarketData = {
+    [K in Entry]?: MarketDataEntry | null;
+}
+
+interface MarketWSMessage {
+    type: string;
+    timestamp: number;
+    instrumentId: InstrumentId;
+    marketData: MarketData;
 }
 
 export interface MarketDataResponse extends RofexResponse {

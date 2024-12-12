@@ -13,7 +13,7 @@ export type Entry =
     "LO" /*TRADING SESSION LOW PRICE: Precio mínimo de la rueda*/ |
     "TV" /*TRADE VOLUME: Volumen operado en contratos/nominales para ese security*/ |
     "OI" /*OPEN INTEREST: Interés abierto (solo para futuros)*/ |
-    "IV" /*OPEN INTEREST: Interés abierto (solo para futuros)*/ |
+    "IV" /*INDEX VALUE: Valor del índice (solo para índices)*/ |
     "EV" /*TRADE EFFECTIVE VOLUME: Volumen efectivo de negociación para ese security*/ |
     "NV" /*NOMINAL VOLUME: Volumen nominal de negociación para ese security*/ |
     "ACP" /*AUCTION PRICE: Precio de cierre del día corriente*/

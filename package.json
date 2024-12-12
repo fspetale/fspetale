@@ -1,17 +1,19 @@
 {
   "name": "rofexjs",
-  "version": "1.1.4",
+  "version": "1.2.2",
   "description": "--- # Documentación Rofexjs ---",
-  "main": "jsRofex.js",
+  "main": "./jsRofex.js",
+  "types": "./jsRofex.d.ts",
   "dependencies": {
-    "request": "^2.88.0",
-    "ws": "^7.2.0",
-    "websocket": "^1.0.30"
+    "axios": "^1.7.2",
+    "ws": "^8.17.1"
   },
-  "devDependencies": {},
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest"
   },
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
 }

@@ -1,175 +1,317 @@
-const request = require("request");
-class jsRofex {
+const axios = require('axios');
+const WebSocket = require('ws');
 
-    constructor(pDominio) {
-        this.autenticado = false;
-        this.Entorno_token = "";
-        this.base_url = "";
+
+class RofexClient {
+    /**
+     * Initializes jsRofex instance.
+     * @param {string} user - User's username.
+     * @param {string} password - User's password.
+     * @param {boolean} prod - Indicates whether to use production environment.
+     */
+    constructor(user, password, baseURL) {
+        this._user = user;
+        this._password = password;
+        this._authenticated = false;
+        this._accessToken = "";
+        this._domain = baseURL ? baseURL : process.env.BASE_URL;
+        this._baseURL = `https://${this._domain}`;
+        this._wssURL = `wss://${this._domain}`;
+        this._wsClient = null;
         this.accounts = {};
-        if (pDominio == "reMarkets" || pDominio == "production") {
-            if (pDominio == "reMarkets") {
-                this.base_url = "https://api.remarkets.primary.com.ar";
-            } else {
-                if (pDominio == "production") {
-                    this.base_url = "https://api.primary.com.ar";
-                }
-            }
-        } else {
-            console.log("Error");
-        }
     }
 
-
-    login(user, password, pCallback) {
-
-        var new_url = this.base_url.concat("/auth/getToken");
-
-        
-        var token_int = "";
+    /**
+     * Authenticates user and retrieves access token.
+     * @returns {Object} - { status: "OK" } on success, { status: "Error", detail: error message } on failure.
+     */
+    async _login() {
+        const url = `${this._baseURL}/auth/getToken`;
         try {
-            request.post({
-                    headers: {
-                        "X-Username": user,
-                        "X-Password": password
-                    },
-                    url: new_url
-                },
-                function(error, response, body) {
-                    if (!error && response.statusCode == 200) {
-                        this.oContexto.Entorno_token = response.headers['x-auth-token'];
-                        this.oContexto.autenticado = true;
-                        
-                        pCallback({status:"OK"});
-                    } else {
-                        if (!response || typeof(response) == "undefined") {
-                            pCallback({status:"Error", detail:error});
-                        } else {
-                            if (typeof(response.headers) == "undefined" || typeof(response.headers['set-cookie']) == "undefined" || !response.headers['set-cookie']) {
-                                pCallback({status:"Error", detail:error});
-                            } else {
-                                token_int = response.headers['X-Auth-Token'].toString().split(";")[0];
-                                this.Entorno_token = token_int;
-                                this.autenticado = true;
-                                pCallback({status:"OK"});
-                            }
-                        }
-                    }
-                }.bind({
-                    oContexto: this
-                })
-            );
-        } catch (error) {
-            pCallback({status:"Error", detail:error});
-        }
-    }
-
-
-    get_accounts(pCallback) {
-        var new_url = this.base_url.concat("/rest/accounts");
-        this.query_get(new_url, function(Id_accounts) {
-        var oId_accounts;
-        if (typeof Id_accounts == "string") {
-            oId_accounts =JSON.parse(Id_accounts);}else{
-                oId_accounts = Id_accounts;}
-
-        if (oId_accounts.status == "OK") {
-                this.oContexto.accounts = oId_accounts.accounts;
-                pCallback(Id_accounts);
-            } else {
-                pCallback(Id_accounts);
-            }
-        }.bind({
-            oContexto: this
-        }));
-    }
-
-    query_get(new_url, Callback_get) {
-        
-
-        request.get({
+            const response = await axios.post(url, null, {
                 headers: {
-                    "X-Auth-Token": this.Entorno_token
-                },
-                url: new_url
-            },
-            function(error, response, body) {
-                if (!error && response.statusCode == 200) {
-                    if (body.indexOf("j_spring_security_check") > 0) {
-                        this.autenticado = false;
-                        Callback_get({status:"Error", detail:error});
-                    }
-                    Callback_get(body);
-                } else {
-                    Callback_get({status:"Error", detail:"The query returned an unexpected result."});
+                    "X-Username": this._user,
+                    "X-Password": this._password
                 }
             });
-    }
 
-    get_instruments(type_request, sec_detailed = false, Callback_get) {
-        var new_url = "";
-        if (type_request == "segments" || type_request == "securities") {
-            if (type_request == "segments") {
-                new_url = this.base_url.concat("/rest/segment/all");
+            if (response.status === 200) {
+                this._accessToken = response.headers['x-auth-token'];
+                this._authenticated = true;
+                return { status: "OK" };
             } else {
-                if (type_request == "securities" && sec_detailed == false) {
-                    new_url = this.base_url.concat("/rest/instruments/all");
-                } else {
-                    new_url = this.base_url.concat("/rest/instruments/details");
-                }
+                return { status: "Error", detail: response.statusText };
             }
-        } else {
-            Callback_get({status:"Error", detail:"Invalid  type of 'request' parameter."});
+        } catch (error) {
+            return { status: "Error", detail: error.message };
         }
-        this.query_get(new_url, Callback_get);
     }
 
-    get_market_data(market_id = "ROFX", symbol, entries = "", depth = 1, Callback_get) {
-        var new_url = this.base_url.concat("/rest/marketdata/get?marketId=", market_id, "&symbol=", symbol, "&entries=", entries.join(), "&depth=", depth);
-        this.query_get(new_url, Callback_get);
-    }
+    /**
+     * Performs a GET request with access token.
+     * @param {string} url - URL for the GET request.
+     * @returns {Object|string} - Parsed JSON response or error details.
+     */
+    async _queryGet(url) {
+        try {
+            if (!this._authenticated) {
+                const auth = await this._login();
+                if (auth.status !== "OK") return auth;
+            }
 
-    get_trade_history(market_id = "ROFX", symbol, date_query = "", date_from = "", date_to = "", Callback_get) {
+            const response = await axios.get(url, {
+                headers: {
+                    "X-Auth-Token": this._accessToken
+                }
+            });
 
-        var new_url = this.base_url.concat("/rest/data/getTrades?marketId=", market_id, "&symbol=", symbol);
-        if (date_query == "") {
-            new_url = new_url.concat("&dateFrom=", date_from, "&dateTo=", date_to)
-        } else {
-            new_url = new_url.concat("&date=", date_query);
+            if (response.status === 200) {
+                if (typeof response.data === 'string') {
+                    if (response.data.indexOf("j_spring_security_check") > 0) {
+                        this._authenticated = false;
+                        return { status: "Error", detail: "Authentication failed." };
+                    }
+                    return JSON.parse(response.data);
+                }
+                return response.data;
+            } else {
+                return { status: "Error", detail: "The query returned an unexpected result." };
+            }
+        } catch (error) {
+            return { status: "Error", detail: error.message };
         }
-        this.query_get(new_url, Callback_get);
     }
 
-    get_order_status(lookup_type = "", order_id = "", proprietary = "", Callback_get) {
+    /**
+     * Connect and authenticate a the web socket client
+     * @returns {WebSocket|null} - A websocket instance authenticated or null if could't connect
+     */
+    async connectWS(timeout = 5000) {
+        const wsURL = this._wssURL;
 
-        var new_url = this.base_url.concat("/rest/order/id?clOrdId=", order_id, "&proprietary=", proprietary);
-        this.query_get(new_url, Callback_get);
+        if (this._wsClient && this._wsClient.readyState !== this._wsClient.CLOSED) {
+            return this._wsClient
+        }
+
+        if (!this._authenticated) {
+            const auth = await this._login();
+            if (auth.status !== "OK") {
+                throw auth;
+            };
+        }
+
+        try {
+            this._wsClient = new WebSocket(wsURL, {
+                headers: {
+                    'x-auth-token': this._accessToken
+                },
+                handshakeTimeout: timeout
+            });
+
+            this._wsClient.on('open', () => {
+                console.log('WebSocket connection opened.');
+            });
+
+            this._wsClient.on('error', (error) => {
+                console.error('WebSocket error:', error);
+            });
+
+            this._wsClient.on('close', (code, reason) => {
+                console.log('WebSocket connection closed:', code, reason.toString());
+            });
+
+            return this._wsClient;
+        } catch (error) {
+            console.error('Failed to connect WebSocket:', error);
+            throw error;
+        }
     }
 
-    get_all_orders_status(accountId = "", Callback_get) {
+    async _waitForWebSocketConnect(timeout) {
+        // If the WebSocket is already open, resolve immediately
+        if (this._wsClient.readyState === WebSocket.OPEN) {
+            return Promise.resolve();
+        }
 
-        var new_url = this.base_url.concat("/rest/order/actives?accountId=", accountId);
-        this.query_get(new_url, Callback_get);
+        // If the WebSocket is already closed or closing, reject immediately
+        if (this._wsClient.readyState === WebSocket.CLOSED || this._wsClient.readyState === WebSocket.CLOSING) {
+            return Promise.reject(new Error('WebSocket is closed or closing.'));
+        }
+
+        return new Promise((resolve, reject) => {
+            // Create a timeout promise that rejects after the specified time
+            const timeoutId = setTimeout(() => {
+                reject(new Error('WebSocket connection timed out'));
+            }, timeout);
+
+            this._wsClient.once('open', () => {
+                clearTimeout(timeoutId); // Clear the timeout if the connection is successful
+                resolve();
+            });
+
+            this._wsClient.once('error', (err) => {
+                clearTimeout(timeoutId);
+                reject(err);
+            });
+        });
     }
 
-
-    new_order(symbol = "", side = "", quantity = 0, price = 0.0, order_type = "Limit", time_in_force = "Day", iceberg = false, expire_date = null,
-        display_quantity = null, account = "", cancelPrev = false, Callback_get) {
-
-        var market_id = "ROFX";
-
-        var new_url = this.base_url.concat("/rest/order/newSingleOrder?marketId=", market_id, "&symbol=", symbol,
-            "&side=", side, "&orderQty=", quantity, "&price=", price, "&ordType=", order_type, "&timeInForce=", time_in_force,
-            "&expireDate=", expire_date, "&account=", account);
-        if (iceberg == true) new_url = new_url.concat("&iceberg=true&displayQty=", displayQty);
-        if (cancelPrev == true) new_url = new_url.concat("&cancelPrevious=true");
-
-        this.query_get(new_url, Callback_get);
+    async wsSend(message, timeout = 5000) {
+        await this.connectWS(timeout);
+        await this._waitForWebSocketConnect(timeout);
+        await this._wsClient.send(message);
     }
 
-    cancel_order(order_id = "", proprietary = "", Callback_get) {
-        var new_url = this.base_url.concat("/rest/order/cancelById?clOrdId=", order_id, "&proprietary=", proprietary);
-        this.query_get(new_url, Callback_get);
+    /**
+     * Retrieves accounts associated with the authenticated user.
+     * @returns {Object} - Response object containing accounts or error details.
+     */
+    async getAccounts() {
+        const url = `${this._baseURL}/rest/accounts`;
+        const data = await this._queryGet(url);
+        if (data.status === "OK") {
+            this.accounts = data.accounts
+        }
+        return data;
+    }
+
+    /**
+     * Retrieves available segments.
+     * @returns {Object} - Response object containing segments or error details.
+     */
+    async getSegments() {
+        const url = `${this._baseURL}/rest/segment/all`;
+        return await this._queryGet(url);
+    }
+
+    /**
+     * Retrieves all available instruments.
+     * @returns {Object} - Response object containing instruments or error details.
+     */
+    async getInstruments() {
+        const url = `${this._baseURL}/rest/instruments/all`;
+        return await this._queryGet(url);
+    }
+
+    /**
+     * Retrieves detailed information about available instruments.
+     * @returns {Object} - Response object containing detailed instruments or error details.
+     */
+    async getDetailedInstruments() {
+        const url = `${this._baseURL}/rest/instruments/details`;
+        return await this._queryGet(url);
+    }
+
+    /**
+     * Retrieves market data for a specific symbol.
+     * @param {string} marketId - Market ID.
+     * @param {string} symbol - Symbol to retrieve market data for.
+     * @param {Array} entries - Array of entries to retrieve (e.g., ["BI", "OF", "LA"]).
+     * @param {number} depth - Depth of market data to retrieve.
+     * @returns {Object} - Response object containing market data or error details.
+     */
+    async getMarketData(marketId = "ROFX", symbol, entries = [], depth = 1) {
+        const url = `${this._baseURL}/rest/marketdata/get?marketId=${marketId}&symbol=${symbol}&entries=${Array.from(entries).join()}&depth=${depth}`;
+        return await this._queryGet(url);
+    }
+
+    /**
+     * Retrieves trade history for a specific symbol.
+     * @param {string} marketId - Market ID.
+     * @param {string} symbol - Symbol to retrieve trade history for.
+     * @param {string} dateQuery - Specific date to query (YYYY-MM-DD format).
+     * @param {string} dateFrom - Start date for range query (YYYY-MM-DD format).
+     * @param {string} dateTo - End date for range query (YYYY-MM-DD format).
+     * @returns {Object} - Response object containing trade history or error details.
+     */
+    async getTradeHistory(marketId = "ROFX", symbol, dateQuery = "", dateFrom = "", dateTo = "") {
+        let url = `${this._baseURL}/rest/data/getTrades?marketId=${marketId}&symbol=${symbol}`;
+
+        if (dateQuery === "") {
+            url += `&dateFrom=${dateFrom}&dateTo=${dateTo}`;
+        } else {
+            url += `&date=${dateQuery}`;
+        }
+
+        return await this._queryGet(url);
+    }
+
+    /**
+     * Retrieves status of a specific order.
+     * @param {string} orderId - Order ID (clOrdId).
+     * @param {string} proprietary - Proprietary ID.
+     * @returns {Object} - Response object containing order status or error details.
+     */
+    async getOrderStatus(orderId = "", proprietary = "") {
+        const url = `${this._baseURL}/rest/order/id?clOrdId=${orderId}&proprietary=${proprietary}`;
+        return await this._queryGet(url);
+    }
+
+    /**
+     * Retrieves status of all orders for a specific account.
+     * @param {string} accountId - Account ID.
+     * @returns {Object} - Response object containing orders status or error details.
+     */
+    async getAllOrdersStatus(accountId = "") {
+        const url = `${this._baseURL}/rest/order/actives?accountId=${accountId}`;
+        return await this._queryGet(url);
+    }
+
+    /**
+     * Places a new order.
+     * @param {string} symbol - Symbol to place order for.
+     * @param {string} side - Order side ("Buy" or "Sell").
+     * @param {number} quantity - Order quantity.
+     * @param {number} price - Order price.
+     * @param {string} orderType - Type of order ("Limit", "Market", etc.).
+     * @param {string} timeInForce - Time in force for order ("Day", "GTC", etc.).
+     * @param {boolean} iceberg - Indicates if order is iceberg.
+     * @param {string|null} expireDate - Expiration date for order.
+     * @param {number|null} displayQuantity - Display quantity for iceberg order.
+     * @param {string} account - Account ID for order.
+     * @param {boolean} cancelPrev - Indicates if previous orders should be canceled.
+     * @returns {Object} - Response object containing order details or error details.
+     */
+    async newOrder(symbol = "", side = "", quantity = 0, price = 0.0, orderType = "Limit", timeInForce = "Day", iceberg = false, expireDate = null, displayQuantity = null, account = "", cancelPrev = false) {
+        const marketId = "ROFX";
+        let url = `${this._baseURL}/rest/order/newSingleOrder?marketId=${marketId}&symbol=${symbol}&side=${side}&orderQty=${quantity}&price=${price}&ordType=${orderType}&timeInForce=${timeInForce}&expireDate=${expireDate}&account=${account}`;
+
+        if (iceberg) url += `&iceberg=true&displayQty=${displayQuantity}`;
+        if (cancelPrev) url += "&cancelPrevious=true";
+
+        return await this._queryGet(url);
+    }
+
+    /**
+     * Cancels a specific order.
+     * @param {string} orderId - Order ID (clOrdId).
+     * @param {string} proprietary - Proprietary ID.
+     * @returns {Object} - Response object confirming order cancellation or error details.
+     */
+    async cancelOrder(orderId = "", proprietary = "") {
+        const url = `${this._baseURL}/rest/order/cancelById?clOrdId=${orderId}&proprietary=${proprietary}`;
+        return await this._queryGet(url);
+    }
+
+    async subscribeMarketdata(instrumentIds = [], entries = [], level = 1, depth = 1) {
+
+        const maxBlockSize = 1000;
+        for (let i = 0; i < instrumentIds.length; i += maxBlockSize) {
+            const block = instrumentIds.slice(i, i + maxBlockSize);
+            const subscription = {
+                type: "smd",
+                level, // level 1 de info para el libro de ordenes
+                entries: Array.from(entries),
+                products: block.map((instrumentId) => ({
+                    symbol: instrumentId.symbol,
+                    marketId: instrumentId.marketId
+                })),
+                depth //el mejor precio de compra y venta, a diferencia de los primeros 10
+            };
+
+            this.wsSend(JSON.stringify(subscription))
+        }
     }
 }
 
-module.exports = jsRofex;
+module.exports = RofexClient;
